@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ArrowDownRight, ArrowUpRight, Building2, Check, Cloud, FileSpreadsheet, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
 import floorplansData from './data/floorplans-data.json';
 
-type CostLine = { id: number; plan: string; code: string; trade: string; description: string; current: number };
+type CostLine = { id: number; plan: string; code: string; trade: string; description: string; current: number; lineCount?: number };
 type Bid = CostLine & { bidId: string; bidder: string; amount: number; date: string; scope: string; notes: string };
 type FloorplansData = {
   source: { importedAt: string };
@@ -13,7 +13,8 @@ type FloorplansData = {
 };
 
 const sourceData = floorplansData as FloorplansData;
-const sourceCosts: CostLine[] = sourceData.plans.flatMap((sourcePlan, planIndex) =>
+const excludedFromTradeTotals = new Set(['351-01']); // Electrical - Temporary Power
+const sourceLineCosts: CostLine[] = sourceData.plans.flatMap((sourcePlan, planIndex) =>
   sourceData.items.flatMap((item, itemIndex) => {
     const current = sourcePlan.values[itemIndex];
     return typeof current === 'number'
@@ -21,6 +22,35 @@ const sourceCosts: CostLine[] = sourceData.plans.flatMap((sourcePlan, planIndex)
       : [];
   }),
 );
+const sourceCosts: CostLine[] = sourceData.plans.flatMap((sourcePlan, planIndex) => {
+  const grouped = new Map<string, { current: number; codes: string[]; descriptions: string[]; hasValue: boolean }>();
+  sourceData.items.forEach((item, itemIndex) => {
+    if (excludedFromTradeTotals.has(item.code)) return;
+    const group = grouped.get(item.category) ?? { current: 0, codes: [], descriptions: [], hasValue: false };
+    const value = sourcePlan.values[itemIndex];
+    group.codes.push(item.code);
+    group.descriptions.push(item.item);
+    if (typeof value === 'number') {
+      group.current += value;
+      group.hasValue = true;
+    }
+    grouped.set(item.category, group);
+  });
+
+  return [...grouped.entries()].flatMap(([trade, group], groupIndex) => {
+    if (!group.hasValue) return [];
+    const lineCount = group.codes.length;
+    return [{
+      id: planIndex * 1000 + groupIndex + 1,
+      plan: sourcePlan.name,
+      code: group.codes.join(', '),
+      trade,
+      description: lineCount > 1 ? `${trade} — combined ${lineCount} lines` : group.descriptions[0],
+      current: group.current,
+      lineCount,
+    }];
+  });
+});
 const refreshWorkflowUrl = 'https://github.com/SteveHarry10/Potential-Trade-Cost-Comparison/actions/workflows/refresh-dashboard.yml';
 
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -52,7 +82,8 @@ export default function Dashboard() {
   const bidCostOptions = costRows.filter((row) => row.plan === bidPlan);
   const selected = costRows.find((row) => row.id === selectedId && row.plan === bidPlan) ?? bidCostOptions[0] ?? costRows[0];
   const visibleBids = bids.map((bid) => {
-    const latest = costRows.find((cost) => cost.plan === bid.plan && cost.code === bid.code);
+    const latest = costRows.find((cost) => cost.plan === bid.plan && cost.code === bid.code)
+      ?? sourceLineCosts.find((cost) => cost.plan === bid.plan && cost.code === bid.code);
     return latest ? { ...bid, current: latest.current, description: latest.description, trade: latest.trade } : bid;
   }).filter((row) => {
     const matchesFilters = (plan === 'All plans' || row.plan === plan) && (trade === 'All trades' || row.trade === trade);
@@ -115,7 +146,7 @@ export default function Dashboard() {
     <main className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border bg-[#080b0d]">
         <div className="mx-auto flex max-w-[1500px] flex-col gap-5 px-5 py-6 lg:flex-row lg:items-end lg:justify-between lg:px-8">
-          <div><p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-primary"><Building2 size={15} /> Builder Bid Desk</p><h1 className="mt-2 text-3xl font-semibold tracking-[-0.035em] text-white">Trade Cost Dashboard</h1><p className="mt-2 text-sm text-slate-400">{plans.length} plans · {trades.length} trades · {costRows.length} current cost lines · {bids.length} bids</p></div>
+          <div><p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-primary"><Building2 size={15} /> Builder Bid Desk</p><h1 className="mt-2 text-3xl font-semibold tracking-[-0.035em] text-white">Trade Cost Dashboard</h1><p className="mt-2 text-sm text-slate-400">{plans.length} plans · {trades.length} trades · {costRows.length} current trade totals · {bids.length} bids</p></div>
           <div className="grid w-full gap-3 sm:grid-cols-2 lg:max-w-[720px]">
             <label className="field-label">Plan<select value={plan} onChange={(e) => setPlan(e.target.value)}><option>All plans</option>{plans.map((value) => <option key={value}>{value}</option>)}</select></label>
             <label className="field-label">Trade<select value={trade} onChange={(e) => setTrade(e.target.value)}><option>All trades</option>{trades.map((value) => <option key={value}>{value}</option>)}</select></label>
@@ -136,7 +167,7 @@ export default function Dashboard() {
               <button className="primary-button" type="submit" disabled={saving || !selected}><Check size={16} /> {saving ? 'Saving…' : 'Save bid'}</button>
             </div>
           </form>
-          <div className="panel p-5"><div className="flex items-start justify-between gap-4"><div><p className="eyebrow">Company data</p><h2 className="mt-1">SharePoint source</h2></div><span className="status-dot">{costStatus}</span></div><div className="mt-4 rounded-xl border border-border bg-black/15 p-4"><div className="flex items-center gap-3"><FileSpreadsheet className="text-primary" size={21} /><div><p className="text-sm font-semibold">Master Costing Sheet</p><p className="mt-0.5 text-xs text-muted-foreground">{costRows.length.toLocaleString()} cost lines · {plans.length} plans</p><p className="mt-1 text-[11px] text-muted-foreground">Imported {sourceData.source.importedAt}</p></div></div><button className="secondary-button mt-4" type="button" onClick={() => window.open(refreshWorkflowUrl, '_blank', 'noopener,noreferrer')}><RefreshCw size={15} />Refresh via GitHub</button></div></div>
+          <div className="panel p-5"><div className="flex items-start justify-between gap-4"><div><p className="eyebrow">Company data</p><h2 className="mt-1">SharePoint source</h2></div><span className="status-dot">{costStatus}</span></div><div className="mt-4 rounded-xl border border-border bg-black/15 p-4"><div className="flex items-center gap-3"><FileSpreadsheet className="text-primary" size={21} /><div><p className="text-sm font-semibold">Master Costing Sheet</p><p className="mt-0.5 text-xs text-muted-foreground">{costRows.length.toLocaleString()} trade totals · {sourceLineCosts.length.toLocaleString()} source lines · {plans.length} plans</p><p className="mt-1 text-[11px] text-muted-foreground">Imported {sourceData.source.importedAt}</p></div></div><button className="secondary-button mt-4" type="button" onClick={() => window.open(refreshWorkflowUrl, '_blank', 'noopener,noreferrer')}><RefreshCw size={15} />Refresh via GitHub</button></div></div>
         </aside>
         <div className="min-w-0 space-y-5">
           <section className="panel p-5"><div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><h2>Bidder summary</h2><p className="mt-1 text-sm text-muted-foreground">{bidderSummary.length} bidders · {visibleBids.length} active bids</p></div><div className="cloud-pill"><Cloud size={14} /> Latest cost baseline</div></div><div className="overflow-x-auto"><table><thead><tr><th>Bidder</th><th className="text-right">Active bids</th><th className="text-right">Avg. difference</th><th className="text-right">Avg. %</th></tr></thead><tbody>{bidderSummary.map((row) => <tr key={row.name}><td className="font-semibold text-white">{row.name}</td><td className="text-right">{row.count}</td><td className={`text-right font-semibold ${row.variance <= 0 ? 'good' : 'bad'}`}>{row.variance <= 0 ? '' : '+'}{money.format(row.variance / row.count)}</td><td className={`text-right font-semibold ${row.percent <= 0 ? 'good' : 'bad'}`}>{row.percent > 0 ? '+' : ''}{row.percent.toFixed(1)}%</td></tr>)}</tbody></table></div></section>
