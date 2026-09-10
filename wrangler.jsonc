@@ -8,7 +8,7 @@
     {
       "binding": "DB",
       "database_name": "trade-cost-dashboard",
-      "database_id": "PASTE_YOUR_D1_DATABASE_ID_HERE",
+      "database_id": "c3c627bb-bb6a-4da9-a706-6ac0c4af585a",
       "migrations_dir": "migrations"
     }
   ],
