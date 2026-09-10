@@ -10,6 +10,8 @@
     "build": "vinext build",
     "start": "wrangler dev",
     "deploy": "pnpm build && wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply trade-cost-dashboard --local",
+    "db:migrate:remote": "wrangler d1 migrations apply trade-cost-dashboard --remote",
     "lint": "oxlint",
     "format": "oxfmt"
   },

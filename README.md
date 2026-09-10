@@ -1,17 +1,34 @@
 # Trade Cost Dashboard
 
-A responsive bid-comparison dashboard modeled on the supplied Builder Bid Desk snapshot. It matches potential trade bids to the latest Floorplans workbook row by **plan + cost code**, then recalculates the dollar and percentage variance whenever costs are refreshed.
+A responsive trade-bid comparison dashboard modeled on the supplied Builder Bid Desk snapshot. It matches potential bids to the latest Floorplans workbook row by **plan + cost code**.
+
+## How data works
+
+- **Current costs:** generated from the SharePoint workbook by a GitHub Action, using the same `FLOORPLAN_XLSX_URL` secret and parsing script as the existing Floorplan Cost Comparison dashboard.
+- **Shared bids:** stored in Cloudflare D1 instead of browser storage, so coworkers see the same bids.
+- **Updated comparisons:** each displayed bid is re-matched to the newest plan + cost code after the cost data is refreshed and deployed.
+
+Power Automate and a SharePoint Cloudflare secret are not required.
 
 ## Included
 
-- Fast bid entry matching the supplied Plan → Trade → Bidder → Amount/Date layout
-- Complete Floorplans snapshot: 47 plans and 3,383 current plan/cost-code combinations
-- Plan, trade, and keyword filtering
+- Fast bid entry using the requested Plan → Trade → Bidder → Amount/Date layout
+- All populated cost lines from the Floorplans worksheet
+- Plan, trade, and keyword filters
 - Bidder-level average variance rollups
-- Current cost / bid / variance / percentage comparison table
-- Device-local bid persistence
-- Server-side SharePoint/Excel connector so the workbook URL or token never ships to the browser
-- Responsive dark UI matching the reference image
+- Current cost, bid, variance, and percentage comparison
+- Shared bid persistence through Cloudflare D1
+- Hourly and manual SharePoint cost refresh through GitHub Actions
+- Responsive dark interface based on the supplied reference image
+
+## Setup
+
+Follow `CLOUDFLARE-SETUP.md`. In short:
+
+1. Create and bind the D1 database, then create its bids table.
+2. Add the GitHub repository secret `FLOORPLAN_XLSX_URL` with the SharePoint Excel sharing link.
+3. Push to `main` and allow Cloudflare to deploy.
+4. Run **Actions → Refresh dashboard from SharePoint Excel** whenever an immediate cost update is needed.
 
 ## Run locally
 
@@ -19,39 +36,13 @@ Requirements: Node.js 22.13+ and pnpm.
 
 ```bash
 pnpm install
-cp .env.example .env.local
 pnpm dev
 ```
 
 Open `http://localhost:3000`.
 
-## Connect the SharePoint Floorplans workbook
-
-The repository includes the complete current `Floorplans` sheet from **Master Costing Sheet Live** as its initial dataset. The supplied SharePoint view link is session-based, so a deployed server cannot safely reuse the browser session behind that link. For automatic refreshes, expose the existing `FloorplanCosts` table through a secure Microsoft 365 endpoint. A simple approach is a Power Automate flow:
-
-1. Use the workbook's existing `FloorplanCosts` table stored in SharePoint.
-2. Create a flow with an HTTP request trigger (or another authenticated HTTP front door).
-3. Add **Excel Online (Business) → List rows present in a table** and choose the SharePoint site, workbook, and Floorplans table.
-4. Return the `value` array in the response.
-5. Put the generated endpoint in `SHAREPOINT_EXCEL_ENDPOINT` in `.env.local` or the host's secret settings. If the endpoint expects a bearer token, also set `SHAREPOINT_EXCEL_TOKEN`.
-
-The connector accepts either a JSON array or `{ "value": [...] }`. It understands both the workbook's native wide layout (`Code`, `Item`, then one column per plan) and a normalized row layout with these names:
-
-| Dashboard field | Accepted workbook headers |
-| --- | --- |
-| Plan | `plan`, `Plan`, `Floorplan` |
-| Cost code | `code`, `Code`, `Cost Code` |
-| Trade | `trade`, `Trade`, `Category` |
-| Description | `description`, `Description`, `Item` |
-| Current cost | `current`, `Current`, `Cost`, `Amount` |
-
-After changing costs in Excel, click **Refresh costs**. Every existing bid is re-matched to its latest plan + cost code and the comparison updates immediately.
-
-## Production
+## Production build
 
 ```bash
 pnpm build
-pnpm start
 ```
-
-Keep `.env.local` out of Git. Only `.env.example` is included in the repository.

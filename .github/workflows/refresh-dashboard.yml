@@ -1,0 +1,60 @@
+name: Refresh dashboard from SharePoint Excel
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 * * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-dashboard:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download floorplan workbook
+        shell: pwsh
+        env:
+          FLOORPLAN_XLSX_URL: ${{ secrets.FLOORPLAN_XLSX_URL }}
+        run: |
+          if (-not $env:FLOORPLAN_XLSX_URL) {
+            throw "Missing GitHub secret FLOORPLAN_XLSX_URL. Add the SharePoint workbook link as a repository secret."
+          }
+
+          New-Item -ItemType Directory -Force -Path "data" | Out-Null
+
+          $url = $env:FLOORPLAN_XLSX_URL.Trim()
+          if ($url -notmatch "download=1") {
+            $separator = if ($url.Contains("?")) { "&" } else { "?" }
+            $url = "$url${separator}download=1"
+          }
+
+          Invoke-WebRequest -Uri $url -OutFile "data\Floorplans Costs.xlsx" -MaximumRedirection 10
+
+          $bytes = [System.IO.File]::ReadAllBytes("data\Floorplans Costs.xlsx")
+          $looksLikeXlsx = $bytes.Length -gt 4 -and $bytes[0] -eq 0x50 -and $bytes[1] -eq 0x4B
+          if (-not $looksLikeXlsx) {
+            throw "The downloaded file does not look like an .xlsx workbook. Check that the SharePoint link allows download access from GitHub Actions."
+          }
+
+      - name: Rebuild dashboard data from Floorplans sheet
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File ".\build-dashboard.ps1" -WorkbookPath ".\data\Floorplans Costs.xlsx" -OutputPath "$env:RUNNER_TEMP\floorplan-dashboard.html" -SheetName "Floorplans" -PlanNameRow 5 -MainSqftRow 7 -SecondSqftRow 8 -ThirdSqftRow 9 -BasementSqftRow 10 -DataOutputPath ".\app\data\floorplans-data.json"
+
+      - name: Commit refreshed cost data
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/data/floorplans-data.json
+          if (git diff --cached --quiet) {
+            "No cost changes to commit."
+            exit 0
+          }
+          git commit -m "Refresh floorplan costs"
+          git push
