@@ -45,7 +45,7 @@ const sourceCosts: CostLine[] = sourceData.plans.flatMap((sourcePlan, planIndex)
       plan: sourcePlan.name,
       code: group.codes.join(', '),
       trade,
-      description: lineCount > 1 ? `${trade} — combined ${lineCount} lines` : group.descriptions[0],
+      description: lineCount > 1 ? trade : group.descriptions[0],
       current: group.current,
       lineCount,
     }];
